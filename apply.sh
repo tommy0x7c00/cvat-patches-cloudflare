@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CVAT_DIR=""
 DOMAIN=""
 DATA_DIR=""
+REVERT=false
 
 usage() {
     echo "Usage: $0 <cvat_path> [options]"
@@ -17,11 +18,13 @@ usage() {
     echo "Options:"
     echo "  -d, --domain DOMAIN    Set CVAT domain (e.g. cvat.example.com)"
     echo "  -D, --data-dir DIR     Set host data directory for cvat_share volume"
+    echo "  -r, --revert           Revert all patches, restore localhost access"
     echo "  -h, --help             Show this help"
     echo ""
     echo "Examples:"
     echo "  $0 ../cvat --domain cvat.example.com --data-dir /data/cvat"
     echo "  $0 ../cvat -d cvat.example.com -D /data/cvat"
+    echo "  $0 ../cvat --revert"
     exit 1
 }
 
@@ -31,6 +34,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help)    usage ;;
         -d|--domain)  DOMAIN="$2";  shift 2 ;;
         -D|--data-dir) DATA_DIR="$2"; shift 2 ;;
+        -r|--revert)  REVERT=true; shift ;;
         -*)           echo "Error: Unknown option $1"; usage ;;
         *)
             if [ -z "$CVAT_DIR" ]; then
@@ -53,6 +57,87 @@ if [ ! -f "$CVAT_DIR/docker-compose.yml" ]; then
 fi
 
 echo "Applying Cloudflare Tunnel patches to: $CVAT_DIR"
+
+# ========== Revert mode ==========
+if [ "$REVERT" = true ]; then
+    echo ""
+    echo "Reverting Cloudflare Tunnel patches..."
+
+    # 1. Reverse the docker-compose.yml patch
+    if grep -q "force-https@file" "$CVAT_DIR/docker-compose.yml"; then
+        patch -R -p1 -d "$CVAT_DIR" < "$SCRIPT_DIR/patches/docker-compose.yml.patch"
+        echo "  Reverted docker-compose.yml"
+    else
+        echo "  docker-compose.yml not patched, skipping."
+    fi
+
+    # 2. Clean override (keep data volume, remove tunnel config)
+    if [ -f "$CVAT_DIR/docker-compose.override.yml" ]; then
+        # Extract data device path if present
+        data_device=""
+        data_device=$(grep "device:" "$CVAT_DIR/docker-compose.override.yml" | awk '{print $2}')
+        if [ -n "$data_device" ] && [ "$data_device" != "/path/to/your/data" ]; then
+            # Has real data dir: generate minimal override with only data volume
+            cat > "$CVAT_DIR/docker-compose.override.yml" << OVERRIDE
+services:
+  cvat_server:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_import:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_export:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_annotation:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_chunks:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_utils:
+    volumes:
+      - cvat_share:/home/django/share:ro
+
+volumes:
+  cvat_share:
+    driver_opts:
+      type: none
+      device: $data_device
+      o: bind
+OVERRIDE
+            echo "  Cleaned docker-compose.override.yml (kept data volume: $data_device)"
+        else
+            rm -f "$CVAT_DIR/docker-compose.override.yml"
+            echo "  Removed docker-compose.override.yml"
+        fi
+    fi
+
+    # 3. Remove .env
+    if [ -f "$CVAT_DIR/.env" ]; then
+        rm -f "$CVAT_DIR/.env"
+        echo "  Removed .env"
+    fi
+
+    # 4. Remove cloudflare_tunnel.py
+    if [ -f "$CVAT_DIR/cvat/settings/cloudflare_tunnel.py" ]; then
+        rm -f "$CVAT_DIR/cvat/settings/cloudflare_tunnel.py"
+        echo "  Removed cvat/settings/cloudflare_tunnel.py"
+    fi
+
+    # 5. Remove traefik rules
+    if [ -f "$CVAT_DIR/traefik/rules/force-https.yml" ]; then
+        rm -f "$CVAT_DIR/traefik/rules/force-https.yml"
+        rmdir "$CVAT_DIR/traefik/rules" 2>/dev/null || true
+        rmdir "$CVAT_DIR/traefik" 2>/dev/null || true
+        echo "  Removed traefik/rules/force-https.yml"
+    fi
+
+    echo ""
+    echo "Done! CVAT is restored to localhost access."
+    echo "Run: cd $CVAT_DIR && docker compose up -d"
+    exit 0
+fi
 
 # 1. Copy new files
 cp "$SCRIPT_DIR/patches/cvat/settings/cloudflare_tunnel.py" "$CVAT_DIR/cvat/settings/"
