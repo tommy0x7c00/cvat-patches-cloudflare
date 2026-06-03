@@ -1,6 +1,9 @@
 # CVAT Cloudflare Tunnel patch - override configuration
 # Edit the device path below to match your data directory.
 services:
+  traefik:
+    volumes:
+      - ./traefik/rules/force-https.yml:/etc/traefik/rules/force-https.yml:ro
   cvat_server:
     environment:
       CSRF_TRUSTED_ORIGINS: '${CSRF_TRUSTED_ORIGINS:-}'
