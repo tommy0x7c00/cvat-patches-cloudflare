@@ -1,0 +1,10 @@
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -110,6 +110,7 @@
+         (PathPrefix(`/api/`) || PathPrefix(`/static/`) || PathPrefix(`/admin`)
+           || PathPrefix(`/django-rq`))
+       traefik.http.routers.cvat.entrypoints: web
++      traefik.http.routers.cvat.middlewares: force-https@file
+     volumes:
+       - cvat_data:/home/django/data
+       - cvat_keys:/home/django/keys

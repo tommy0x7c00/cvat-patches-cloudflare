@@ -1,0 +1,6 @@
+http:
+  middlewares:
+    force-https:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"

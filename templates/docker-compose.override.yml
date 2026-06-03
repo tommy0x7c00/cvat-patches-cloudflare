@@ -1,0 +1,33 @@
+# CVAT Cloudflare Tunnel patch - override configuration
+# Edit the device path below to match your data directory.
+services:
+  cvat_server:
+    environment:
+      CSRF_TRUSTED_ORIGINS: '${CSRF_TRUSTED_ORIGINS:-}'
+      SESSION_COOKIE_SECURE: '${SESSION_COOKIE_SECURE:-false}'
+      CSRF_COOKIE_SECURE: '${CSRF_COOKIE_SECURE:-false}'
+      SECURE_HSTS_SECONDS: '${SECURE_HSTS_SECONDS:-0}'
+    volumes:
+      - ./cvat/settings/cloudflare_tunnel.py:/home/django/cvat/settings/cloudflare_tunnel.py:ro
+  cvat_worker_import:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_export:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_annotation:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_chunks:
+    volumes:
+      - cvat_share:/home/django/share:ro
+  cvat_worker_utils:
+    volumes:
+      - cvat_share:/home/django/share:ro
+
+volumes:
+  cvat_share:
+    driver_opts:
+      type: none
+      device: /path/to/your/data  # TODO: change to your actual data directory
+      o: bind
