@@ -217,10 +217,12 @@ fi
 if [ -n "$DOMAIN" ]; then
     # --domain specified: always generate (overwrite if needed)
     sed -e "s|your-domain.com|${DOMAIN}|g" \
+        -e "s|__LAN_IP__|${LAN_IP:-127.0.0.1}|g" \
         "$SCRIPT_DIR/templates/.env.example" > "$CVAT_DIR/.env"
-    echo "  Created .env (domain: $DOMAIN)"
+    echo "  Created .env (domain: $DOMAIN, LAN IP: ${LAN_IP:-127.0.0.1})"
 elif [ ! -f "$CVAT_DIR/.env" ]; then
-    cp "$SCRIPT_DIR/templates/.env.example" "$CVAT_DIR/.env"
+    sed -e "s|__LAN_IP__|${LAN_IP:-127.0.0.1}|g" \
+        "$SCRIPT_DIR/templates/.env.example" > "$CVAT_DIR/.env"
     echo "  Created .env from template (edit your domain!)"
 else
     echo "  .env already exists, skipping."
