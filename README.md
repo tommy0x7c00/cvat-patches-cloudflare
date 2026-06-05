@@ -8,8 +8,8 @@ Patches for [CVAT](https://github.com/cvat-ai/cvat) to support deployment behind
 - `traefik/rules/force-https.yml` — Traefik middleware to forward HTTPS headers
 - `docker-compose.yml.patch` — Adds traefik middleware label to CVAT's compose file
 - `docker-compose.override.yml` — Environment variables and volume mounts
-- `.env.example` — Environment template
-- LAN IP routing — Adds local network IP to Traefik Host rules (auto-detected or manual)
+- `.env.example` — Environment template with CSRF trusted origins for LAN IP
+- LAN IP routing — Adds local network IP to Traefik Host rules and CSRF trusted origins (auto-detected or manual)
 
 ## Usage
 
@@ -60,6 +60,14 @@ Options:
 - Docker & Docker Compose
 - A Cloudflare Tunnel pointing to `cvat_server:8080`
 - A domain configured in Cloudflare DNS
+
+## Note on LAN IP
+
+The LAN IP is added to both Traefik routing rules and Django's `CSRF_TRUSTED_ORIGINS`. If your machine's IP changes, re-run `apply.sh` with the new IP:
+
+```bash
+./cvat-patches-cloudflare/apply.sh ../cvat --domain cvat.example.com --data-dir /data/cvat --lan-ip 192.168.2.100
+```
 
 ## Reverting
 
