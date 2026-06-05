@@ -91,6 +91,15 @@ if [ "$REVERT" = true ]; then
         echo "  docker-compose.yml not patched, skipping."
     fi
 
+    # 1b. Remove cloudflare_tunnel import from production.py
+    if grep -q "from .cloudflare_tunnel import" "$CVAT_DIR/cvat/settings/production.py"; then
+        sed -i '/# Cloudflare Tunnel settings (added by cvat-patches-cloudflare)/d' "$CVAT_DIR/cvat/settings/production.py"
+        sed -i '/from .cloudflare_tunnel import \*/d' "$CVAT_DIR/cvat/settings/production.py"
+        # Remove trailing empty lines
+        sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$CVAT_DIR/cvat/settings/production.py"
+        echo "  Removed cloudflare_tunnel import from production.py"
+    fi
+
     # 2. Remove LAN IP from Traefik routing rules
     if grep -q "|| Host(\`" "$CVAT_DIR/docker-compose.yml"; then
         # cvat_server: (Host(`domain`) || Host(`ip`)) -> Host(`domain`)
@@ -172,6 +181,16 @@ fi
 cp "$SCRIPT_DIR/patches/cvat/settings/cloudflare_tunnel.py" "$CVAT_DIR/cvat/settings/"
 mkdir -p "$CVAT_DIR/traefik/rules"
 cp "$SCRIPT_DIR/patches/traefik/rules/force-https.yml" "$CVAT_DIR/traefik/rules/"
+
+# 1b. Import cloudflare_tunnel settings in production.py (CVAT server uses production settings)
+if grep -q "from .cloudflare_tunnel import" "$CVAT_DIR/cvat/settings/production.py"; then
+    echo "  production.py already imports cloudflare_tunnel, skipping."
+else
+    echo "" >> "$CVAT_DIR/cvat/settings/production.py"
+    echo "# Cloudflare Tunnel settings (added by cvat-patches-cloudflare)" >> "$CVAT_DIR/cvat/settings/production.py"
+    echo "from .cloudflare_tunnel import *" >> "$CVAT_DIR/cvat/settings/production.py"
+    echo "  Patched production.py to import cloudflare_tunnel"
+fi
 
 # 2. Patch docker-compose.yml (add traefik middleware label)
 if grep -q "force-https@file" "$CVAT_DIR/docker-compose.yml"; then

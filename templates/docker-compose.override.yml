@@ -12,6 +12,7 @@ services:
       SECURE_HSTS_SECONDS: '${SECURE_HSTS_SECONDS:-0}'
     volumes:
       - ./cvat/settings/cloudflare_tunnel.py:/home/django/cvat/settings/cloudflare_tunnel.py:ro
+      - ./cvat/settings/production.py:/home/django/cvat/settings/production.py:ro
       - cvat_share:/home/django/share:ro
   cvat_worker_import:
     volumes:
