@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CVAT_DIR=""
 DOMAIN=""
 DATA_DIR=""
+LAN_IP=""
 REVERT=false
 
 usage() {
@@ -18,12 +19,13 @@ usage() {
     echo "Options:"
     echo "  -d, --domain DOMAIN    Set CVAT domain (e.g. cvat.example.com)"
     echo "  -D, --data-dir DIR     Set host data directory for cvat_share volume"
+    echo "  -i, --lan-ip IP        Set LAN IP for local network access (auto-detected if omitted)"
     echo "  -r, --revert           Revert all patches, restore localhost access"
     echo "  -h, --help             Show this help"
     echo ""
     echo "Examples:"
     echo "  $0 ../cvat --domain cvat.example.com --data-dir /data/cvat"
-    echo "  $0 ../cvat -d cvat.example.com -D /data/cvat"
+    echo "  $0 ../cvat -d cvat.example.com -D /data/cvat --lan-ip 192.168.2.88"
     echo "  $0 ../cvat --revert"
     exit 1
 }
@@ -34,6 +36,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help)    usage ;;
         -d|--domain)  DOMAIN="$2";  shift 2 ;;
         -D|--data-dir) DATA_DIR="$2"; shift 2 ;;
+        -i|--lan-ip)  LAN_IP="$2"; shift 2 ;;
         -r|--revert)  REVERT=true; shift ;;
         -*)           echo "Error: Unknown option $1"; usage ;;
         *)
@@ -56,6 +59,23 @@ if [ ! -f "$CVAT_DIR/docker-compose.yml" ]; then
     usage
 fi
 
+# Normalize: remove trailing slash from DATA_DIR
+DATA_DIR="${DATA_DIR%/}"
+
+# Auto-detect LAN IP if not specified
+if [ -z "$LAN_IP" ]; then
+    LAN_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)
+    if [ -z "$LAN_IP" ]; then
+        LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    fi
+    if [ -n "$LAN_IP" ]; then
+        echo "Auto-detected LAN IP: $LAN_IP"
+    else
+        echo "Warning: Could not auto-detect LAN IP. Local network access will not be configured."
+        echo "  Use --lan-ip to set manually."
+    fi
+fi
+
 echo "Applying Cloudflare Tunnel patches to: $CVAT_DIR"
 
 # ========== Revert mode ==========
@@ -71,7 +91,16 @@ if [ "$REVERT" = true ]; then
         echo "  docker-compose.yml not patched, skipping."
     fi
 
-    # 2. Clean override (keep data volume, remove tunnel config)
+    # 2. Remove LAN IP from Traefik routing rules
+    if grep -q "|| Host(\`" "$CVAT_DIR/docker-compose.yml"; then
+        # cvat_server: (Host(`domain`) || Host(`ip`)) -> Host(`domain`)
+        sed -i 's#(Host(`${CVAT_HOST:-localhost}`) || Host(`[^`]*`))#Host(`${CVAT_HOST:-localhost}`)#' "$CVAT_DIR/docker-compose.yml"
+        # cvat_ui: Host(`domain`) || Host(`ip`) -> Host(`domain`)
+        sed -i '/traefik.http.routers.cvat-ui.rule:/s#Host(`${CVAT_HOST:-localhost}`) || Host(`[^`]*`)#Host(`${CVAT_HOST:-localhost}`)#' "$CVAT_DIR/docker-compose.yml"
+        echo "  Removed LAN IP from Traefik routing rules"
+    fi
+
+    # 3. Clean override (keep data volume, remove tunnel config)
     if [ -f "$CVAT_DIR/docker-compose.override.yml" ]; then
         # Extract data device path if present
         data_device=""
@@ -113,19 +142,19 @@ OVERRIDE
         fi
     fi
 
-    # 3. Remove .env
+    # 4. Remove .env
     if [ -f "$CVAT_DIR/.env" ]; then
         rm -f "$CVAT_DIR/.env"
         echo "  Removed .env"
     fi
 
-    # 4. Remove cloudflare_tunnel.py
+    # 5. Remove cloudflare_tunnel.py
     if [ -f "$CVAT_DIR/cvat/settings/cloudflare_tunnel.py" ]; then
         rm -f "$CVAT_DIR/cvat/settings/cloudflare_tunnel.py"
         echo "  Removed cvat/settings/cloudflare_tunnel.py"
     fi
 
-    # 5. Remove traefik rules
+    # 6. Remove traefik rules
     if [ -f "$CVAT_DIR/traefik/rules/force-https.yml" ]; then
         rm -f "$CVAT_DIR/traefik/rules/force-https.yml"
         rmdir "$CVAT_DIR/traefik/rules" 2>/dev/null || true
@@ -152,7 +181,26 @@ else
     echo "  Patched docker-compose.yml"
 fi
 
-# 3. Create docker-compose.override.yml
+# 3. Add LAN IP to Traefik routing rules (allows local network access)
+if [ -n "$LAN_IP" ]; then
+    # cvat_server: Host(`domain`) -> (Host(`domain`) || Host(`ip`))
+    if grep -q "Host(\`${LAN_IP}\`)" "$CVAT_DIR/docker-compose.yml"; then
+        echo "  LAN IP ($LAN_IP) already in cvat_server routing, skipping."
+    else
+        sed -i 's#Host(`${CVAT_HOST:-localhost}`) &&#(Host(`${CVAT_HOST:-localhost}`) || Host(`'"${LAN_IP}"'`)) \&\&#' "$CVAT_DIR/docker-compose.yml"
+        echo "  Added LAN IP ($LAN_IP) to cvat_server routing"
+    fi
+
+    # cvat_ui: Host(`domain`) -> Host(`domain`) || Host(`ip`)
+    if grep -A1 "traefik.http.routers.cvat-ui.rule:" "$CVAT_DIR/docker-compose.yml" | grep -q "Host(\`${LAN_IP}\`)"; then
+        echo "  LAN IP ($LAN_IP) already in cvat_ui routing, skipping."
+    else
+        sed -i '/traefik.http.routers.cvat-ui.rule:/s#Host(`${CVAT_HOST:-localhost}`)#Host(`${CVAT_HOST:-localhost}`) || Host(`'"${LAN_IP}"'`)#' "$CVAT_DIR/docker-compose.yml"
+        echo "  Added LAN IP ($LAN_IP) to cvat_ui routing"
+    fi
+fi
+
+# 4. Create docker-compose.override.yml
 if [ -n "$DATA_DIR" ]; then
     # --data-dir specified: always generate (overwrite if needed)
     sed "s|/path/to/your/data|${DATA_DIR}|g" \
@@ -165,7 +213,7 @@ else
     echo "  docker-compose.override.yml already exists, skipping."
 fi
 
-# 4. Create .env
+# 5. Create .env
 if [ -n "$DOMAIN" ]; then
     # --domain specified: always generate (overwrite if needed)
     sed -e "s|your-domain.com|${DOMAIN}|g" \

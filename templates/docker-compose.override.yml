@@ -12,6 +12,7 @@ services:
       SECURE_HSTS_SECONDS: '${SECURE_HSTS_SECONDS:-0}'
     volumes:
       - ./cvat/settings/cloudflare_tunnel.py:/home/django/cvat/settings/cloudflare_tunnel.py:ro
+      - cvat_share:/home/django/share:ro
   cvat_worker_import:
     volumes:
       - cvat_share:/home/django/share:ro
@@ -32,5 +33,5 @@ volumes:
   cvat_share:
     driver_opts:
       type: none
-      device: /path/to/your/data  # TODO: change to your actual data directory
+      device: /path/to/your/data
       o: bind
